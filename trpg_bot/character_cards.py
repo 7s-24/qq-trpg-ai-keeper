@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from trpg_bot import simple_yaml as yaml
+from trpg_bot import yaml_compat as yaml
 
 from trpg_bot.config import get_settings
 from trpg_bot.memory.sqlite_store import SQLiteStore

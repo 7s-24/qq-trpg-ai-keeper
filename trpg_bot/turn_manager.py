@@ -16,12 +16,12 @@ logger = logging.getLogger(__name__)
 
 
 class TurnManager:
-    def __init__(self, sqlite: SQLiteStore | None = None) -> None:
+    def __init__(self, sqlite: SQLiteStore | None = None, ai: AIClient | None = None) -> None:
         self.sqlite = sqlite or SQLiteStore()
         self.markdown = MarkdownStore()
         self.retriever = MemoryRetriever(self.sqlite)
         self.cards = CharacterCardStore(self.sqlite)
-        self.ai = AIClient()
+        self.ai = ai or AIClient()
         self._locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
     def get_settings(self, group_id: str) -> CampaignSettings:
@@ -88,12 +88,31 @@ class TurnManager:
                     next_turn_required_players=[],
                     parse_error=str(exc),
                 )
-            self.markdown.append_session_reply(settings.campaign_id, settings.current_turn_id, messages, ai_reply.reply)
+            rendered_reply = self.render_ai_reply(settings, messages, ai_reply)
+            ai_reply.reply = rendered_reply
+            self.markdown.append_session_reply(settings.campaign_id, settings.current_turn_id, messages, rendered_reply)
             self.markdown.append_memory_update(settings.campaign_id, settings.current_turn_id, ai_reply.memory_update)
             self._write_structured_memories(settings, ai_reply)
             settings.required_players = set(ai_reply.next_turn_required_players)
             self.sqlite.close_and_next_turn(settings)
             return ai_reply
+
+    def render_ai_reply(self, settings: CampaignSettings, messages: list[TurnMessage], ai_reply: AIReply) -> str:
+        if not ai_reply.dice_requests:
+            return ai_reply.reply
+        names = {m.user_id: m.nickname for m in messages}
+        lines = [ai_reply.reply.rstrip(), "", "🎲 需要检定:"]
+        for request in ai_reply.dice_requests:
+            label = names.get(request.user_id) or self._card_display_name(settings.campaign_id, request.user_id) or request.user_id
+            reason = f"（用于：{request.reason}）" if request.reason else ""
+            lines.append(f"- {label}({request.user_id})：请发送 {request.suggested_command}{reason}")
+        return "\n".join(lines).strip()
+
+    def _card_display_name(self, campaign_id: str, user_id: str) -> str | None:
+        card = self.cards.load_card(campaign_id, user_id)
+        if not card:
+            return None
+        return str(card.get("character_name") or card.get("player") or "") or None
 
     def _write_structured_memories(self, settings: CampaignSettings, ai_reply: AIReply) -> None:
         type_map = {"session_log": "event", "characters": "character", "npcs": "npc", "locations": "location", "clues": "clue", "world_state": "world_state", "unresolved_threads": "thread"}

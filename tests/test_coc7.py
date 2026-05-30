@@ -13,7 +13,7 @@ def test_coc7_success_levels():
 
 def test_coc7_template_validates():
     rule = COC7RuleSystem()
-    from trpg_bot import simple_yaml as yaml
+    from trpg_bot import yaml_compat as yaml
 
     card = yaml.safe_load(rule.get_character_template())
     ok, errors = rule.validate_character_card(card)

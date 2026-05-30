@@ -20,6 +20,8 @@ class Settings:
     ai_api_key: str = ""
     ai_model: str = "gpt-4o-mini"
     ai_timeout_seconds: int = 60
+    # 新手无角色卡或技能缺失时，COC7 可用这个基准值继续判定；按团风可在 .env 调整。
+    default_skill_value: int = 50
 
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -49,6 +51,7 @@ def get_settings() -> Settings:
         ai_api_key=_env("AI_API_KEY", ""),
         ai_model=_env("AI_MODEL", "gpt-4o-mini"),
         ai_timeout_seconds=int(_env("AI_TIMEOUT_SECONDS", "60")),
+        default_skill_value=int(_env("DEFAULT_SKILL_VALUE", "50")),
     )
     settings.ensure_dirs()
     return settings

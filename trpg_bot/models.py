@@ -89,12 +89,20 @@ class CheckResult:
 
 
 @dataclass(slots=True)
+class DiceRequest:
+    user_id: str
+    skill: str
+    reason: str = ""
+    suggested_command: str = ""
+
+
+@dataclass(slots=True)
 class AIReply:
     reply: str
     memory_update: dict[str, list[Any]]
     next_turn_required_players: list[str]
     next_turn_reason: str = ""
-    dice_requests: list[Any] = field(default_factory=list)
+    dice_requests: list[DiceRequest] = field(default_factory=list)
     raw_text: str = ""
     parse_error: str | None = None
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from trpg_bot import simple_yaml as yaml
+from trpg_bot import yaml_compat as yaml
 
 from trpg_bot.dice import roll_dice
 from trpg_bot.models import CheckResult, DiceRoll
