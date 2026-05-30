@@ -189,7 +189,7 @@ QQ 官方 Bot 适配器在不同事件类型、权限和版本下，字段名称
 
 1. 在 `.env` 中把你的 QQ 号加入 `TRPG_SUPERUSERS`。
 2. 在目标群里发送 `.调试事件`。
-3. 查看 `data/logs/qq_event_debug.jsonl`，确认当前适配器实际提供的 `event.model_dump()` 字段。
+3. 查看 `data/logs/qq_event_debug.jsonl`，确认当前适配器实际提供的 `event.model_dump()` 字段；该指令即使暂时无法解析 `group_id`，也会以 `unknown` 记录，便于排查字段名。
 4. 如需适配特殊事件（例如拍一拍），优先根据日志扩展 `trpg_bot/qq_events.py` 中的 `_get_group_id()`、`_get_user_id()`、`_is_admin()` 或 `handle_poke_event()`，不要假设所有 QQ 事件都有同一套字段。
 
 该调试指令是 superuser-only，不会开放给普通 KP 或群管理员。

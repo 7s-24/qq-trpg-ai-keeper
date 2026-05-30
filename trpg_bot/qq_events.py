@@ -15,7 +15,7 @@ from trpg_bot.config import get_settings
 from trpg_bot.dice import DiceExpressionError, render_roll, roll_dice
 from trpg_bot.memory.sqlite_store import SQLiteStore
 from trpg_bot.models import ReplyMode, RuleSystemName
-from trpg_bot.permissions import UserContext, can_execute, deny_message
+from trpg_bot.permissions import UserContext, can_execute, deny_message, is_superuser
 from trpg_bot.rule_systems import get_rule_system
 from trpg_bot.turn_manager import TurnManager
 from trpg_bot.utils import extract_mentioned_user_ids, now_iso
@@ -42,14 +42,24 @@ notice_handler = on_notice(priority=10, block=False)
 
 @message_handler.handle()
 async def handle_group_message(bot: Bot, event: Event, text: str = EventPlainText()) -> None:
-    group_id = _get_group_id(event)
-    user_id = _get_user_id(event)
+    event_dump = _event_dump(event)
+    group_id = _get_group_id_from_dump(event_dump)
+    user_id = _get_user_id_from_dump(event_dump)
+    command = parse_command(text)
+
+    # .调试事件 的目的就是排查真实 QQ 字段；即使 group_id 解析失败，也允许 superuser 写入原始 event。
+    if command and command.command == ".调试事件":
+        if not user_id or not is_superuser(user_id):
+            await bot.send(event, deny_message(command.command))
+            return
+        await bot.send(event, _write_debug_event(group_id or "unknown", user_id, event_dump))
+        return
+
     if not group_id or not user_id:
         return
-    nickname = _get_nickname(event, user_id)
-    command = parse_command(text)
+    nickname = _get_nickname_from_dump(event_dump, user_id)
     settings = turn_manager.get_settings(group_id)
-    user = UserContext(user_id=user_id, group_id=group_id, is_group_admin=_is_admin(event))
+    user = UserContext(user_id=user_id, group_id=group_id, is_group_admin=_is_admin_from_dump(event_dump))
 
     if command:
         if not can_execute(command.command, user, settings):
@@ -62,7 +72,7 @@ async def handle_group_message(bot: Bot, event: Event, text: str = EventPlainTex
                 nickname,
                 command.command,
                 command.args,
-                event_dump=_event_dump(event),
+                event_dump=event_dump,
             )
         except ValueError as exc:
             reply = f"参数错误：{exc}"
@@ -204,27 +214,42 @@ def _write_debug_event(group_id: str, user_id: str, event_dump: dict[str, Any]) 
 
 
 def _event_dump(event: Event) -> dict[str, Any]:
-    data = getattr(event, "model_dump", lambda: {})()
+    try:
+        data = getattr(event, "model_dump", lambda: {})()
+    except Exception as exc:  # pragma: no cover - defensive against adapter-specific dump failures
+        return {"dump_error": repr(exc)}
     return data if isinstance(data, dict) else {"raw": str(data)}
 
 
-def _get_group_id(event: Event) -> str | None:
-    data = _event_dump(event)
+def _get_group_id_from_dump(data: dict[str, Any]) -> str | None:
     return str(data.get("group_id") or data.get("guild_id") or data.get("channel_id") or "") or None
 
 
-def _get_user_id(event: Event) -> str | None:
-    data = _event_dump(event)
+def _get_user_id_from_dump(data: dict[str, Any]) -> str | None:
     user_id = data.get("user_id") or data.get("author", {}).get("id") or data.get("member", {}).get("user", {}).get("id")
     return str(user_id) if user_id else None
 
 
-def _get_nickname(event: Event, fallback: str) -> str:
-    data = _event_dump(event)
+def _get_nickname_from_dump(data: dict[str, Any], fallback: str) -> str:
     return str(data.get("nickname") or data.get("member", {}).get("nick") or data.get("author", {}).get("username") or fallback)
 
 
-def _is_admin(event: Event) -> bool:
-    data = _event_dump(event)
+def _is_admin_from_dump(data: dict[str, Any]) -> bool:
     role = str(data.get("role") or data.get("member", {}).get("role") or data.get("member", {}).get("role_name") or "").lower()
     return role in {"admin", "administrator", "owner", "群主", "管理员"}
+
+
+def _get_group_id(event: Event) -> str | None:
+    return _get_group_id_from_dump(_event_dump(event))
+
+
+def _get_user_id(event: Event) -> str | None:
+    return _get_user_id_from_dump(_event_dump(event))
+
+
+def _get_nickname(event: Event, fallback: str) -> str:
+    return _get_nickname_from_dump(_event_dump(event), fallback)
+
+
+def _is_admin(event: Event) -> bool:
+    return _is_admin_from_dump(_event_dump(event))
