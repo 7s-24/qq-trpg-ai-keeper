@@ -68,6 +68,7 @@ python bot.py
 - 骰点和检定即时回复，不进入回合缓冲区。
 - `.本轮结束` / `.强制回复` 只有 KP / 群管理员 / superuser 可以触发。
 - 同一群的结算使用 per-group lock，避免连续强制回复重复结算同一回合。
+- 支持 `.暂停` / `.继续`：暂停后普通群消息不进入回合缓冲区，但骰点和管理指令仍可用。
 - AI 回复成功写入 Markdown 和 SQLite 后，才进入下一回合。
 - AI 输出必须是 JSON；解析失败时不会崩溃，会保留原始回复并提示 KP。
 
@@ -89,7 +90,13 @@ python bot.py
 - `.本轮结束`
 - `.强制回复`
 - `.清空本轮`
+- `.暂停`
+- `.继续`
 - `.导入角色卡 <YAML文本>`
+
+### Superuser 调试指令
+
+- `.调试事件`：把当前 `event.model_dump()` 追加写入 `data/logs/qq_event_debug.jsonl`，用于确认真实 QQ 官方 Bot 事件中的群号、用户、管理员、@、notice / 拍一拍字段。
 
 ### 玩家指令
 
@@ -104,7 +111,7 @@ python bot.py
 - `.角色卡模板 DND`
 - `.查看角色卡 @123456`
 - `.我的角色卡`
-- `.当前状态`
+- `.当前状态`（会显示运行中 / 已暂停）
 - `.当前等待`
 - `.当前发言`
 - `.玩家列表`
@@ -173,6 +180,19 @@ data/campaigns/{campaign_id}/
 ```
 
 Markdown 只追加，不覆盖。
+
+## 真实 QQ 接入时如何调试 event 字段
+
+QQ 官方 Bot 适配器在不同事件类型、权限和版本下，字段名称可能不同。例如群号可能来自 `group_id`、频道场景可能来自 `guild_id` / `channel_id`，管理员信息、@ 解析、notice / 拍一拍字段也可能不同。
+
+建议首次接入真实 QQ 环境时：
+
+1. 在 `.env` 中把你的 QQ 号加入 `TRPG_SUPERUSERS`。
+2. 在目标群里发送 `.调试事件`。
+3. 查看 `data/logs/qq_event_debug.jsonl`，确认当前适配器实际提供的 `event.model_dump()` 字段。
+4. 如需适配特殊事件（例如拍一拍），优先根据日志扩展 `trpg_bot/qq_events.py` 中的 `_get_group_id()`、`_get_user_id()`、`_is_admin()` 或 `handle_poke_event()`，不要假设所有 QQ 事件都有同一套字段。
+
+该调试指令是 superuser-only，不会开放给普通 KP 或群管理员。
 
 ## 拍一拍说明
 

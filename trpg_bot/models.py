@@ -62,6 +62,7 @@ class CampaignSettings:
     required_players: set[str] = field(default_factory=set)
     kp_users: set[str] = field(default_factory=set)
     current_turn_id: int = 1
+    running: bool = True
 
 
 @dataclass(slots=True)
@@ -98,4 +99,4 @@ class AIReply:
     parse_error: str | None = None
 
 
-PermissionLevel = Literal["player", "kp"]
+PermissionLevel = Literal["player", "kp", "superuser"]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections import defaultdict
 from typing import Any
 
@@ -10,6 +11,8 @@ from trpg_bot.memory.markdown_store import MarkdownStore
 from trpg_bot.memory.retriever import MemoryRetriever
 from trpg_bot.memory.sqlite_store import SQLiteStore
 from trpg_bot.models import AIReply, CampaignSettings, ReplyMode, TurnMessage
+
+logger = logging.getLogger(__name__)
 
 
 class TurnManager:
@@ -75,7 +78,16 @@ class TurnManager:
                 return AIReply(reply="当前回合没有可结算的玩家发言。", memory_update={}, next_turn_required_players=[])
             memories = self.retriever.retrieve(settings.campaign_id, [m.content for m in messages])
             character_summaries = [self.cards.render_card_summary(settings.campaign_id, uid) for uid in sorted({m.user_id for m in messages})]
-            ai_reply = await self.ai.generate_reply(settings, messages, memories, character_summaries)
+            try:
+                ai_reply = await self.ai.generate_reply(settings, messages, memories, character_summaries)
+            except Exception as exc:
+                logger.exception("AI turn finalization failed for campaign %s turn %s", settings.campaign_id, settings.current_turn_id)
+                return AIReply(
+                    reply=f"AI 结算失败：{exc}。当前回合发言已保留，请稍后重试 .强制回复 或检查 AI 配置。",
+                    memory_update={},
+                    next_turn_required_players=[],
+                    parse_error=str(exc),
+                )
             self.markdown.append_session_reply(settings.campaign_id, settings.current_turn_id, messages, ai_reply.reply)
             self.markdown.append_memory_update(settings.campaign_id, settings.current_turn_id, ai_reply.memory_update)
             self._write_structured_memories(settings, ai_reply)
@@ -88,7 +100,13 @@ class TurnManager:
         for key, items in ai_reply.memory_update.items():
             for item in items:
                 title, content, tags = _memory_fields(item)
-                self.sqlite.add_memory(settings.campaign_id, type_map.get(key, key), title, content, tags, settings.current_turn_id)
+                self.sqlite.upsert_memory(settings.campaign_id, type_map.get(key, key), title, content, tags, settings.current_turn_id)
+
+    def set_running(self, group_id: str, running: bool) -> CampaignSettings:
+        s = self.get_settings(group_id)
+        s.running = running
+        self.sqlite.save_settings(s)
+        return s
 
     def add_player(self, group_id: str, user_id: str) -> CampaignSettings:
         s = self.get_settings(group_id)

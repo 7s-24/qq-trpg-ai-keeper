@@ -16,3 +16,12 @@ def test_player_cannot_force_reply():
 
 def test_player_can_roll():
     assert can_execute(".r", UserContext("2", "g"), CampaignSettings("c", "g"))
+
+
+def test_debug_event_is_superuser_only(monkeypatch):
+    from trpg_bot.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "superusers", {"root"})
+    assert can_execute(".调试事件", UserContext("root", "g"), CampaignSettings("c", "g"))
+    assert not can_execute(".调试事件", UserContext("admin", "g", is_group_admin=True), CampaignSettings("c", "g"))

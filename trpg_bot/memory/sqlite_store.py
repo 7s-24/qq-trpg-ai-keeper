@@ -36,7 +36,8 @@ CREATE TABLE IF NOT EXISTS memories (
 );
 CREATE TABLE IF NOT EXISTS settings (
   campaign_id TEXT PRIMARY KEY, group_id TEXT NOT NULL, reply_mode TEXT NOT NULL, rule_system TEXT NOT NULL,
-  active_players TEXT NOT NULL DEFAULT '[]', required_players TEXT NOT NULL DEFAULT '[]', kp_users TEXT NOT NULL DEFAULT '[]', current_turn_id INTEGER NOT NULL DEFAULT 1
+  active_players TEXT NOT NULL DEFAULT '[]', required_players TEXT NOT NULL DEFAULT '[]', kp_users TEXT NOT NULL DEFAULT '[]', current_turn_id INTEGER NOT NULL DEFAULT 1,
+  running INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS character_cards (
   campaign_id TEXT NOT NULL, user_id TEXT NOT NULL, system TEXT NOT NULL, character_name TEXT, path TEXT NOT NULL, updated_at TEXT NOT NULL,
@@ -68,6 +69,14 @@ class SQLiteStore:
     def init_db(self) -> None:
         with sqlite3.connect(self.path) as conn:
             conn.executescript(SCHEMA)
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(settings)").fetchall()}
+            if "running" not in columns:
+                conn.execute("ALTER TABLE settings ADD COLUMN running INTEGER NOT NULL DEFAULT 1")
+            conn.execute(
+                "DELETE FROM memories WHERE id NOT IN "
+                "(SELECT MAX(id) FROM memories GROUP BY campaign_id, type, title)"
+            )
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_campaign_type_title ON memories(campaign_id, type, title)")
 
     def get_or_create_settings(self, group_id: str) -> CampaignSettings:
         settings = get_settings()
@@ -79,7 +88,7 @@ class SQLiteStore:
             if row is None:
                 kp_users = sorted(settings.default_kps)
                 conn.execute(
-                    "INSERT INTO settings(campaign_id, group_id, reply_mode, rule_system, active_players, required_players, kp_users, current_turn_id) VALUES (?, ?, ?, ?, '[]', '[]', ?, 1)",
+                    "INSERT INTO settings(campaign_id, group_id, reply_mode, rule_system, active_players, required_players, kp_users, current_turn_id, running) VALUES (?, ?, ?, ?, '[]', '[]', ?, 1, 1)",
                     (campaign_id, group_id, settings.default_reply_mode.value, settings.default_rule_system.value, json.dumps(kp_users, ensure_ascii=False)),
                 )
                 conn.execute("INSERT OR IGNORE INTO turns(campaign_id, turn_id, status, created_at) VALUES (?, 1, 'open', ?)", (campaign_id, now))
@@ -89,8 +98,8 @@ class SQLiteStore:
     def save_settings(self, s: CampaignSettings) -> None:
         with self.connect() as conn:
             conn.execute(
-                "UPDATE settings SET reply_mode=?, rule_system=?, active_players=?, required_players=?, kp_users=?, current_turn_id=? WHERE campaign_id=?",
-                (s.reply_mode.value, s.rule_system.value, _json_set(s.active_players), _json_set(s.required_players), _json_set(s.kp_users), s.current_turn_id, s.campaign_id),
+                "UPDATE settings SET reply_mode=?, rule_system=?, active_players=?, required_players=?, kp_users=?, current_turn_id=?, running=? WHERE campaign_id=?",
+                (s.reply_mode.value, s.rule_system.value, _json_set(s.active_players), _json_set(s.required_players), _json_set(s.kp_users), s.current_turn_id, int(s.running), s.campaign_id),
             )
 
     def add_turn_message(self, msg: TurnMessage) -> None:
@@ -121,10 +130,17 @@ class SQLiteStore:
         with self.connect() as conn:
             conn.execute("INSERT INTO character_cards(campaign_id, user_id, system, character_name, path, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(campaign_id, user_id) DO UPDATE SET system=excluded.system, character_name=excluded.character_name, path=excluded.path, updated_at=excluded.updated_at", (campaign_id, user_id, system, character_name, path, utc_now()))
 
-    def add_memory(self, campaign_id: str, type_: str, title: str, content: str, tags: list[str] | None = None, source_turn_id: int | None = None) -> None:
+    def upsert_memory(self, campaign_id: str, type_: str, title: str, content: str, tags: list[str] | None = None, source_turn_id: int | None = None) -> None:
         now = utc_now()
         with self.connect() as conn:
-            conn.execute("INSERT INTO memories(campaign_id, type, title, content, tags, created_at, updated_at, source_turn_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (campaign_id, type_, title, content, json.dumps(tags or [], ensure_ascii=False), now, now, source_turn_id))
+            conn.execute(
+                "INSERT INTO memories(campaign_id, type, title, content, tags, created_at, updated_at, source_turn_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(campaign_id, type, title) DO UPDATE SET content=excluded.content, tags=excluded.tags, updated_at=excluded.updated_at, source_turn_id=excluded.source_turn_id",
+                (campaign_id, type_, title, content, json.dumps(tags or [], ensure_ascii=False), now, now, source_turn_id),
+            )
+
+    def add_memory(self, campaign_id: str, type_: str, title: str, content: str, tags: list[str] | None = None, source_turn_id: int | None = None) -> None:
+        self.upsert_memory(campaign_id, type_, title, content, tags, source_turn_id)
 
     def search_memories(self, campaign_id: str, keywords: list[str], limit: int = 8) -> list[dict[str, Any]]:
         if not keywords:
@@ -147,5 +163,5 @@ def _json_set(values: set[str]) -> str:
 def _settings_from_row(row: sqlite3.Row) -> CampaignSettings:
     return CampaignSettings(
         campaign_id=row["campaign_id"], group_id=row["group_id"], reply_mode=ReplyMode(row["reply_mode"]), rule_system=RuleSystemName(row["rule_system"]),
-        active_players=set(json.loads(row["active_players"] or "[]")), required_players=set(json.loads(row["required_players"] or "[]")), kp_users=set(json.loads(row["kp_users"] or "[]")), current_turn_id=int(row["current_turn_id"]),
+        active_players=set(json.loads(row["active_players"] or "[]")), required_players=set(json.loads(row["required_players"] or "[]")), kp_users=set(json.loads(row["kp_users"] or "[]")), current_turn_id=int(row["current_turn_id"]), running=bool(row["running"]),
     )

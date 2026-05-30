@@ -24,3 +24,11 @@ def test_clear_buffer(tmp_path: Path):
     manager.buffer_message("100", "u1", "玩家1", "行动")
     manager.clear_buffer("100")
     assert manager.list_buffer("100") == []
+
+
+def test_running_pause_prevents_manual_buffering_policy(tmp_path: Path):
+    store = SQLiteStore(tmp_path / "test.sqlite3")
+    manager = TurnManager(store)
+    settings = manager.set_running("100", False)
+    assert not settings.running
+    assert manager.get_settings("100").running is False
